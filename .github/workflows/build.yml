@@ -1,0 +1,15 @@
+name: build
+on: [push, pull_request, workflow_dispatch]
+jobs:
+  macos:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build app
+        run: bash scripts/make_app.sh
+      - name: Zip
+        run: cd build && ditto -c -k --keepParent FaceSwap.app FaceSwap.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FaceSwap
+          path: build/FaceSwap.zip
