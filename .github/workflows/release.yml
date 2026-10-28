@@ -2,8 +2,16 @@ name: release
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Версия релиза (тег), например v0.1.0"
+        required: true
+        default: "v0.1.0"
 permissions:
   contents: write
+env:
+  VER: ${{ inputs.version || github.ref_name }}
 jobs:
   release:
     runs-on: macos-15
@@ -12,10 +20,10 @@ jobs:
       - name: Build app
         run: bash scripts/make_app.sh
       - name: Zip
-        run: cd build && ditto -c -k --keepParent FaceSwap.app FaceSwap-${{ github.ref_name }}-arm64.zip
+        run: cd build && ditto -c -k --keepParent FaceSwap.app FaceSwap-${{ env.VER }}-arm64.zip
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${{ github.ref_name }}" "build/FaceSwap-${{ github.ref_name }}-arm64.zip" \
-            --title "FaceSwapMac ${{ github.ref_name }}" --notes-file .github/RELEASE_NOTES.md
+          gh release create "${{ env.VER }}" "build/FaceSwap-${{ env.VER }}-arm64.zip" \
+            --title "FaceSwapMac ${{ env.VER }}" --notes-file .github/RELEASE_NOTES.md --target "${{ github.sha }}"
