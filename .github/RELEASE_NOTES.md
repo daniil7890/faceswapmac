@@ -8,7 +8,8 @@
 
 **Установка**
 1. Скачай `FaceSwap-v0.1.0-arm64.zip` и распакуй.
-2. Модели (~460 МБ) в комплект не входят: склонируй репозиторий и запусти `bash scripts/download_models.sh`.
+2. Модели (~460 МБ) скачиваются отдельно:
+   `curl -fsSL https://raw.githubusercontent.com/daniil7890/faceswapmac/main/scripts/download_models.sh | bash`
 3. Приложение не подписано, поэтому при первом запуске открой его через правый клик → «Открыть»
    или выполни `xattr -dr com.apple.quarantine FaceSwap.app`.
 
@@ -16,6 +17,6 @@
 
 ---
 First release of FaceSwapMac: real-time one-photo face swap for Apple Silicon Macs. Russian/English UI.
-Models are downloaded separately with `scripts/download_models.sh`. The app is unsigned, so open it via right-click → Open the first time.
+Full install guide: see README (Installation). The app is unsigned, so open it via right-click → Open the first time.
 
 Модели InsightFace разрешено использовать только в некоммерческих целях. Не выдавай себя за других людей без их согласия.
