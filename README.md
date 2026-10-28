@@ -1,5 +1,7 @@
 # FaceSwapMac
 
+**Русский** · [English](README.en.md)
+
 Подмена лица в реальном времени на Mac (Apple Silicon) по одной фотографии. Обучать ничего не нужно.
 
 Пайплайн: камера (AVFoundation, 720p BGRA), затем SCRFD-2.5g находит лицо и 5 точек. После этого ArcFace достаёт «личность» с фото, inswapper_128 рисует новое лицо, и оно вклеивается обратно с мягкой маской. Модели работают через ONNX Runtime с CoreML execution provider (Neural Engine/GPU). Предобработка написана на Swift и сверена с эталоном на Python.
