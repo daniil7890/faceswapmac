@@ -6,3 +6,5 @@ build/
 convert.log
 build.log
 bench.log
+__pycache__/
+*.pyc
