@@ -19,6 +19,7 @@ BIN="$(swift build -c release --arch arm64 --show-bin-path)/FaceSwapMac"
 [ -f "$BIN" ] || BIN="$(find .build -type f -perm -u+x -name FaceSwapMac -path '*elease*' | head -1)"
 [ -f "$BIN" ] || { echo "Не нашла собранный бинарник FaceSwapMac в .build"; exit 1; }
 cp "$BIN" "$APP/Contents/MacOS/FaceSwap"
+cp assets/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -27,6 +28,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
   <key>CFBundleDisplayName</key><string>FaceSwap</string>
   <key>CFBundleIdentifier</key><string>local.faceswapmac</string>
   <key>CFBundleExecutable</key><string>FaceSwap</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>0.2.0</string>
   <key>CFBundleVersion</key><string>2</string>

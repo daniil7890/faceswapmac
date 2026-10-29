@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/icon_256.png" width="128" alt="FaceSwapMac icon"></p>
+
 # FaceSwapMac
 
 [Русский](README.md) · **English**
