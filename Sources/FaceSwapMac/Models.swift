@@ -68,20 +68,43 @@ final class FaceDetector {
         let (input, scale) = ImageOps.letterboxTensor(img, size: size)
         let res = try session.run(withInputs: ["input": try tensor(input, [1, 3, size, size])],
                                   outputNames: Set(outputs), runOptions: nil)
+        var scores = [[Float]](), kps = [[Float]]()
+        for k in 0..<3 {
+            guard let s = res[outputs[k]], let p = res[outputs[k + 6]] else { throw ModelError.badOutput("scrfd") }
+            scores.append(try floats(s)); kps.append(try floats(p))
+        }
+        return SCRFD.decode(scores: scores, kps: kps, size: size, scale: scale, threshold: threshold)
+    }
+}
+
+/// Detector used on every camera frame: native Core ML if the .mlpackage is installed, else ONNX Runtime.
+protocol LiveFaceDetector: AnyObject {
+    var kind: String { get }
+    func detect(_ img: BGRAView, threshold: Float) throws -> (kps: [Pt], score: Float)?
+}
+
+extension FaceDetector: LiveFaceDetector {
+    var kind: String { "ONNX CPU" }
+}
+
+/// SCRFD/RetinaFace head decoding (insightface layout): 3 strides x 2 anchors per cell.
+enum SCRFD {
+    /// Returns the 5 landmarks of the most confident face, in original image pixels.
+    static func decode(scores: [[Float]], kps: [[Float]], size: Int, scale: Float,
+                       threshold: Float) -> (kps: [Pt], score: Float)? {
         var best: (kps: [Pt], score: Float)?
         for (k, stride) in [8, 16, 32].enumerated() {
-            guard let s = res[outputs[k]], let p = res[outputs[k + 6]] else { continue }
-            let scores = try floats(s), kps = try floats(p)
+            let sc = scores[k], kp = kps[k]
             let g = size / stride
-            for i in 0..<scores.count where scores[i] > threshold && scores[i] > (best?.score ?? 0) {
-                let cell = i / 2                       // 2 anchors per cell
+            for i in 0..<sc.count where sc[i] > threshold && sc[i] > (best?.score ?? 0) {
+                let cell = i / 2
                 let ax = Float(cell % g * stride), ay = Float(cell / g * stride)
                 var pts = [Pt]()
                 for j in 0..<5 {
-                    pts.append(Pt(x: (ax + kps[i * 10 + j * 2] * Float(stride)) / scale,
-                                  y: (ay + kps[i * 10 + j * 2 + 1] * Float(stride)) / scale))
+                    pts.append(Pt(x: (ax + kp[i * 10 + j * 2] * Float(stride)) / scale,
+                                  y: (ay + kp[i * 10 + j * 2 + 1] * Float(stride)) / scale))
                 }
-                best = (pts, scores[i])
+                best = (pts, sc[i])
             }
         }
         return best

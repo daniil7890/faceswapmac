@@ -29,6 +29,13 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
     var engine: FaceSwapEngine?
     var swapEnabled = true
 
+    /// Stage 2 (inswapper + paste) runs here while the camera queue already prepares the next frame.
+    private let swapQueue = DispatchQueue(label: "camera.swap", qos: .userInteractive)
+    private let pipeLock = NSLock()
+    private var swapBusy = false
+    private var pending: PreparedFrame?   // newest prepared frame waiting for stage 2
+
+    // main-thread only
     private var lastTime = CACurrentMediaTime()
     private var fpsAccum = 0.0, fpsFrames = 0
 
@@ -85,25 +92,68 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
 
     func captureOutput(_ output: AVCaptureOutput, didOutput sb: CMSampleBuffer, from connection: AVCaptureConnection) {
         guard let pb = CMSampleBufferGetImageBuffer(sb) else { return }
-        var found = false
-        let t0 = CACurrentMediaTime()
-        if swapEnabled, let engine {
-            do { found = try engine.process(pb) }
-            catch { DispatchQueue.main.async { self.error = error.localizedDescription } }
+        guard swapEnabled, let engine, engine.hasSource else {
+            present(pb, found: false, swapMs: nil)
+            return
         }
-        let dt = CACurrentMediaTime() - t0
+        // stage 1 on the camera queue
+        let prepared: PreparedFrame?
+        do { prepared = try engine.prepare(pb) } catch {
+            report(error); present(pb, found: false, swapMs: nil); return
+        }
+        guard let prepared else {
+            // no face: show the raw frame unless a swapped frame is about to come out
+            pipeLock.lock(); let idle = !swapBusy; pipeLock.unlock()
+            if idle { present(pb, found: false, swapMs: nil) }
+            return
+        }
+        pipeLock.lock()
+        if swapBusy {
+            pending = prepared          // replace an older waiting frame; only the newest matters
+            pipeLock.unlock()
+            return
+        }
+        swapBusy = true
+        pipeLock.unlock()
+        swapQueue.async { self.runSwaps(engine, first: prepared) }
+    }
+
+    /// Stage 2 loop: process the frame, then whatever newest frame stage 1 left in `pending`.
+    private func runSwaps(_ engine: FaceSwapEngine, first: PreparedFrame) {
+        var job: PreparedFrame? = first
+        while let j = job {
+            let t0 = CACurrentMediaTime()
+            do {
+                let out = try engine.finish(j)
+                present(out, found: true, swapMs: (CACurrentMediaTime() - t0) * 1000)
+            } catch {
+                report(error)
+                present(j.pixelBuffer, found: false, swapMs: nil)
+            }
+            pipeLock.lock()
+            job = pending
+            pending = nil
+            if job == nil { swapBusy = false }
+            pipeLock.unlock()
+        }
+    }
+
+    private func report(_ error: Error) {
+        let msg = error.localizedDescription
+        DispatchQueue.main.async { self.error = msg }
+    }
+
+    private func present(_ pb: CVPixelBuffer, found: Bool, swapMs: Double?) {
         let cg = ciContext.createCGImage(CIImage(cvPixelBuffer: pb),
                                          from: CGRect(x: 0, y: 0, width: CVPixelBufferGetWidth(pb),
                                                       height: CVPixelBufferGetHeight(pb)))
-        let now = CACurrentMediaTime()
-        fpsAccum += now - lastTime; fpsFrames += 1; lastTime = now
-        var newFps: Double?
-        if fpsAccum > 0.5 { newFps = Double(fpsFrames) / fpsAccum; fpsAccum = 0; fpsFrames = 0 }
         DispatchQueue.main.async {
+            let now = CACurrentMediaTime()
+            self.fpsAccum += now - self.lastTime; self.fpsFrames += 1; self.lastTime = now
+            if self.fpsAccum > 0.5 { self.fps = Double(self.fpsFrames) / self.fpsAccum; self.fpsAccum = 0; self.fpsFrames = 0 }
             self.frame = cg
             self.faceFound = found
-            self.swapMs = self.swapMs * 0.9 + dt * 1000 * 0.1
-            if let newFps { self.fps = newFps }
+            if let swapMs { self.swapMs = self.swapMs * 0.9 + swapMs * 0.1 }
         }
     }
 }

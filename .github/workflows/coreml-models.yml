@@ -1,0 +1,35 @@
+name: coreml-models
+# Converts the live face detector to native Core ML and publishes it as release "models-coreml-v1".
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  convert:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install converters
+        run: pip install "torch==2.5.1" "coremltools==8.3.0" "numpy<2" onnx onnx2torch onnxruntime
+      - name: Download ONNX detector
+        run: |
+          mkdir -p models
+          curl -fL -o models/scrfd_2.5g.onnx https://github.com/facefusion/facefusion-assets/releases/download/models-3.0.0/scrfd_2.5g.onnx
+      - name: Convert + check accuracy
+        run: NO_BENCH=1 PYTHONWARNINGS=ignore python scripts/convert_coreml.py models scrfd_320
+      - name: Zip
+        run: cd models/coreml && ditto -c -k --keepParent scrfd_320.mlpackage ../../scrfd_320.mlpackage.zip
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view models-coreml-v1 >/dev/null 2>&1; then
+            gh release upload models-coreml-v1 scrfd_320.mlpackage.zip --clobber
+          else
+            gh release create models-coreml-v1 scrfd_320.mlpackage.zip --target "${{ github.sha }}" \
+              --title "Core ML models v1" \
+              --notes "Нативные Core ML модели для FaceSwapMac (детектор лица SCRFD 320). Скачиваются автоматически через scripts/download_models.sh. / Native Core ML models, fetched by scripts/download_models.sh."
+          fi

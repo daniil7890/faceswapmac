@@ -2,29 +2,51 @@ import CoreGraphics
 import CoreVideo
 import Foundation
 
-/// Whole pipeline: detect -> align -> inswapper -> paste back. Runs on the camera queue.
+/// One camera frame after stage 1 (detect + align), ready for stage 2 (inswapper + paste).
+struct PreparedFrame {
+    let pixelBuffer: CVPixelBuffer
+    let m: Affine          // frame -> 128x128 crop
+    let crop: [Float]      // CHW RGB 0...1
+    let latent: [Float]
+}
+
+/// Pipeline in two stages so they can run in parallel on different frames:
+///   prepare (camera queue): detect -> smooth -> align -> crop       ~ a few ms
+///   finish  (swap queue):   inswapper -> paste back on GPU           ~ inswapper time
 final class FaceSwapEngine {
-    private let liveDetector: FaceDetector
+    private let liveDetector: LiveFaceDetector
     private let photoDetector: FaceDetector
     private let embedder: FaceEmbedder
     private let swapper: FaceSwapper
+    private let compositor: MetalCompositor?
     private let mask = ImageOps.makeMask()
     private let template128 = arcfaceTemplate112.map { Pt(x: $0.x * 128 / 112, y: $0.y * 128 / 112) }
 
     private let lock = NSLock()
     private var latent: [Float]?
-    private var smoothed: [Pt]?
+    private var smoothed: [Pt]?   // touched only by prepare()
     private var missed = 0
 
     /// 0 = no smoothing; higher = steadier but laggier landmarks.
     var smoothing: Float = 0.5
+    /// Shown in the UI, e.g. "Core ML · Metal".
+    let backendDescription: String
 
     init(modelsDir: URL) throws {
         let rt = try Runtime(modelsDir: modelsDir)
-        liveDetector = try FaceDetector(runtime: rt, file: "scrfd_2.5g.onnx", size: 320)
+        let live: LiveFaceDetector
+        if let cml = CoreMLFaceDetector(modelsDir: modelsDir) {
+            live = cml
+        } else {
+            live = try FaceDetector(runtime: rt, file: "scrfd_2.5g.onnx", size: 320)
+        }
+        let comp = MetalCompositor(mask: ImageOps.makeMask())
+        liveDetector = live
+        compositor = comp
         photoDetector = try FaceDetector(runtime: rt, file: "scrfd_2.5g.onnx", size: 640)
         embedder = try FaceEmbedder(runtime: rt)
         swapper = try FaceSwapper(runtime: rt)
+        backendDescription = "\(live.kind) · \(comp == nil ? "CPU paste" : "Metal")"
     }
 
     var hasSource: Bool { lock.lock(); defer { lock.unlock() }; return latent != nil }
@@ -39,32 +61,47 @@ final class FaceSwapEngine {
         lock.lock(); latent = l; lock.unlock()
     }
 
-    /// Swaps the face in the frame in place. Returns true if a face was swapped.
-    @discardableResult
-    func process(_ pb: CVPixelBuffer) throws -> Bool {
+    /// Stage 1. Returns nil when there is no source face or no face in the frame.
+    func prepare(_ pb: CVPixelBuffer) throws -> PreparedFrame? {
         lock.lock(); let l = latent; lock.unlock()
-        guard let l else { return false }
+        guard let l else { return nil }
 
-        CVPixelBufferLockBaseAddress(pb, [])
-        defer { CVPixelBufferUnlockBaseAddress(pb, []) }
-        guard let base = CVPixelBufferGetBaseAddress(pb) else { return false }
+        CVPixelBufferLockBaseAddress(pb, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(pb, .readOnly) }
+        guard let base = CVPixelBufferGetBaseAddress(pb) else { return nil }
         let view = BGRAView(base: base.assumingMemoryBound(to: UInt8.self),
                             width: CVPixelBufferGetWidth(pb), height: CVPixelBufferGetHeight(pb),
                             rowBytes: CVPixelBufferGetBytesPerRow(pb))
 
-        guard let face = try liveDetector.detect(view) else {
+        guard let face = try liveDetector.detect(view, threshold: 0.5) else {
             missed += 1
             if missed > 3 { smoothed = nil }   // face gone: drop the history so it snaps on return
-            return false
+            return nil
         }
         missed = 0
         let kps = smooth(face.kps)
-
         let m = Affine.similarity(from: kps, to: template128)
         let crop = ImageOps.warpTensor(view, m, size: 128) { $0 / 255 }
-        let out = try swapper.swap(crop: crop, latent: l)
-        ImageOps.pasteBack(into: view, face: out, mask: mask, m: m)
-        return true
+        return PreparedFrame(pixelBuffer: pb, m: m, crop: crop, latent: l)
+    }
+
+    /// Stage 2. Returns the frame with the face swapped (a new buffer on the Metal path).
+    func finish(_ f: PreparedFrame) throws -> CVPixelBuffer {
+        let out = try swapper.swap(crop: f.crop, latent: f.latent)
+        if let compositor, let res = compositor.composite(src: f.pixelBuffer, face: out, m: f.m) {
+            return res
+        }
+        // CPU fallback: paste in place
+        let pb = f.pixelBuffer
+        CVPixelBufferLockBaseAddress(pb, [])
+        defer { CVPixelBufferUnlockBaseAddress(pb, []) }
+        if let base = CVPixelBufferGetBaseAddress(pb) {
+            let view = BGRAView(base: base.assumingMemoryBound(to: UInt8.self),
+                                width: CVPixelBufferGetWidth(pb), height: CVPixelBufferGetHeight(pb),
+                                rowBytes: CVPixelBufferGetBytesPerRow(pb))
+            ImageOps.pasteBack(into: view, face: out, mask: mask, m: f.m)
+        }
+        return pb
     }
 
     /// Exponential smoothing of landmarks; resets on big jumps so fast head turns don't lag.

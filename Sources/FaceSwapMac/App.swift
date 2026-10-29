@@ -34,6 +34,7 @@ final class AppState: ObservableObject {
     /// Changing it redraws the whole UI in the new language.
     @Published var lang = Lang.current { didSet { Lang.current = lang } }
     @Published var ready = false
+    @Published var backend = ""
     @Published var sourceThumb: NSImage?
     @Published var swapOn = true { didSet { camera.swapEnabled = swapOn } }
     @Published var mirror = true
@@ -56,6 +57,7 @@ final class AppState: ObservableObject {
                     self.engine = e
                     self.camera.engine = e
                     self.ready = true
+                    self.backend = e.backendDescription
                     self.status = Loc("Выбери или перетащи фото с лицом", "Choose or drop a photo with a face")
                 }
             } catch {
@@ -164,6 +166,9 @@ struct MainView: View {
             Text(String(format: L("%.0f fps · подмена %.0f мс · %@", "%.0f fps · swap %.0f ms · %@"), cam.fps, cam.swapMs,
                         cam.faceFound ? L("лицо есть", "face found") : L("лица нет", "no face")))
                 .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+            if !app.backend.isEmpty {
+                Text(app.backend).font(.caption2.monospaced()).foregroundStyle(.tertiary)
+            }
             if let e = cam.error { Text(e).font(.caption).foregroundStyle(.red) }
         }
         .padding(16)

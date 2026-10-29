@@ -42,8 +42,12 @@ def bench(fn, n=30):
     for _ in range(n): fn()
     return (time.perf_counter() - t) / n * 1000
 
+ONLY = set(sys.argv[2].split(",")) if len(sys.argv) > 2 and sys.argv[2] else None
+NO_BENCH = os.environ.get("NO_BENCH") == "1"
 results = []
 for name, file, shapes, gens in JOBS:
+    if ONLY and name not in ONLY:
+        continue
     print(f"\n=== {name} ({file}) ===", flush=True)
     path = os.path.join(MODELS, file)
     try:
@@ -86,6 +90,10 @@ for name, file, shapes, gens in JOBS:
             worst_abs = max(worst_abs, float(np.abs(a - b).max()))
         print(f"accuracy vs ONNX: cos={worst_cos:.5f} max_abs={worst_abs:.4f}")
 
+        if worst_cos < 0.99:
+            raise RuntimeError(f"Core ML output differs from ONNX (cos={worst_cos:.4f})")
+        if NO_BENCH:
+            results.append((name, "OK", worst_cos, 1.0, 1.0)); continue
         t_ort = bench(lambda: sess.run(None, feeds))
         ort_cml = ort.InferenceSession(path, providers=["CoreMLExecutionProvider", "CPUExecutionProvider"])
         t_ort_cml = bench(lambda: ort_cml.run(None, feeds))
@@ -97,8 +105,11 @@ for name, file, shapes, gens in JOBS:
         results.append((name, f"FAIL: {type(e).__name__}: {e}"[:200], None, None, None))
 
 print("\n================ SUMMARY ================")
+failed = False
 for name, status, cos, t1, t2 in results:
     if status == "OK":
         print(f"{name:10s} OK   cos={cos:.5f}  ORT+CoreML {t1:6.1f} ms -> native {t2:6.1f} ms  (x{t1 / t2:.2f})")
     else:
+        failed = True
         print(f"{name:10s} {status}")
+sys.exit(1 if failed else 0)
