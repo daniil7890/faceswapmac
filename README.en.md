@@ -131,8 +131,8 @@ photo ──► SCRFD 640 ─► ArcFace ─► identity (512 numbers) ───
 - A "whole head" mode that includes hair (LivePortrait)
 - Pairing with [RVCMac](https://github.com/daniil7890/rvcmac) to change voice and face in one app
 
-## Responsible use and licenses
+## Responsible use and license
 
 Don't impersonate real people without their consent. In most countries that's illegal (fraud, defamation, deepfake laws), and it's simply wrong. The "AI" label on the preview is on by default.
 
-The InsightFace models (inswapper, ArcFace, SCRFD) are licensed for non-commercial use only.
+The code is released under the [MIT License](LICENSE). The license doesn't cover the models: InsightFace (inswapper, ArcFace, SCRFD) allows them for non-commercial use only. The models aren't part of this repository; the script downloads them separately.
