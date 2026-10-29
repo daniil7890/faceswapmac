@@ -2,3 +2,6 @@
 build/
 *.onnx
 .DS_Store
+.venv-coreml/
+convert.log
+build.log
